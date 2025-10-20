@@ -1,0 +1,124 @@
+-- Parámetros 
+DECLARE @Instrumento VARCHAR(20) = 'INSTR-001';
+DECLARE @Tasa FLOAT = 1.1645;
+DECLARE @Nominal FLOAT = 1000;
+DECLARE @FechaCorte DATE = '2025-09-25';
+
+ 
+
+-- Clasificación de instrumento
+WITH Clasificacion AS (
+        'BB' AS Tipo, 'BONO' AS RF UNION ALL
+        SELECT 'BCP', 'BONO' UNION ALL
+        SELECT 'BCU', 'BONO' UNION ALL
+        SELECT 'BE', 'BONO' UNION ALL
+        SELECT 'BEF', 'BONO' UNION ALL
+        SELECT 'BH', 'BONO' UNION ALL
+        SELECT 'BR', 'BONO' UNION ALL
+        SELECT 'BS', 'BONO' UNION ALL
+        SELECT 'BTP', 'BONO' UNION ALL
+        SELECT 'BTU', 'BONO' UNION ALL
+        SELECT 'BU', 'BONO' UNION ALL
+        SELECT 'BVL', 'BONO' UNION ALL
+        SELECT 'CERO', 'BONO' UNION ALL
+        SELECT 'EC', 'BONO' UNION ALL
+        SELECT 'LH', 'BONO' UNION ALL
+        SELECT 'DP', 'IIF' UNION ALL
+        SELECT 'PDBC', 'IIF' UNION ALL
+        SELECT 'PRC', 'IIF'
+),
+
+-- Tipo y moneda
+TipoInstrumento AS (
+    SELECT DISTINCT
+        I.Instrumento,
+        C.Categoria,
+        I.Moneda
+    FROM InstrumentosFinancieros I
+    LEFT JOIN Clasificacion C ON C.Tipo = I.TipoInstrumento
+    WHERE I.Instrumento = @Instrumento
+
+),
+
+ 
+
+-- Base según moneda
+BaseEmision AS (
+    SELECT
+        T.Instrumento,
+        T.Categoria,
+        CASE
+            WHEN T.Moneda = 'CLP' THEN 30
+            ELSE 360
+        END AS Base
+    FROM TipoInstrumento T
+
+),
+
+ 
+
+-- Valor presente de flujos futuros (solo para BONO)
+VPFlujos AS (
+    SELECT
+        F.Instrumento,
+        F.FechaVencimiento,
+        F.FlujoTotal,
+        DATEDIFF(DAY, @FechaCorte, F.FechaVencimiento) AS DiasAVencimiento,
+        B.Base,
+        T.Categoria,
+        ROUND(
+            F.FlujoTotal /
+            CASE
+                WHEN T.Categoria = 'BONO' THEN
+                    POWER(1 + (@Tasa / 100.0), DATEDIFF(DAY, @FechaCorte, F.FechaVencimiento) * 1.0 / F.BaseEmision)
+            END,
+            6
+        ) AS VP_Flujo
+
+    FROM FlujosInstrumento F
+    INNER JOIN BaseEmision B ON B.Instrumento = F.Instrumento
+    INNER JOIN TipoInstrumento T ON T.Instrumento = F.Instrumento
+    WHERE F.Instrumento = @Instrumento
+      AND F.FechaVencimiento > @FechaCorte
+
+),
+
+ 
+
+-- Vencimiento para IIF
+
+VencimientoIIF AS (
+    SELECT
+        Instrumento,
+        MAX(FechaVencimiento) AS Vencimiento
+    FROM InstrumentosFinancieros
+    WHERE Instrumento = @Instrumento AND FechaVencimiento IS NOT NULL
+    GROUP BY Instrumento
+
+)
+
+ 
+
+-- Resultado
+SELECT
+    @Instrumento AS Instrumento,
+    T.Categoria,
+    CASE
+        WHEN T.Categoria = 'BONO' THEN
+            ROUND(SUM(VP.VP_Flujo) * @Nominal / 100.0, 6)
+        ELSE
+            ROUND(
+                @Nominal / (
+                    1 + (@Tasa / B.Base / 100.0) * DATEDIFF(DAY, @FechaCorte, V.Vencimiento)
+                ),
+                6
+            )
+    END AS Valorizacion
+
+FROM TipoInstrumento T
+JOIN BaseEmision B ON B.Instrumento = T.Instrumento
+LEFT JOIN VPFlujos VP ON VP.Instrumento = T.Instrumento AND T.Categoria = 'BONO'
+LEFT JOIN VencimientoIIF V ON V.Instrumento = T.Instrumento
+GROUP BY T.Instrumento, T.Categoria, B.Base, V.Vencimiento
+
+ 
