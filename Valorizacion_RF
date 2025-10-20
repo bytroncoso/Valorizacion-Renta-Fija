@@ -8,7 +8,7 @@ DECLARE @FechaCorte DATE = '2025-09-25';
 
 -- Clasificación de instrumento
 WITH Clasificacion AS (
-        'BB' AS Tipo, 'BONO' AS RF UNION ALL
+        'BB' AS Tipo, 'BONO' AS Categoria UNION ALL
         SELECT 'BCP', 'BONO' UNION ALL
         SELECT 'BCU', 'BONO' UNION ALL
         SELECT 'BE', 'BONO' UNION ALL
